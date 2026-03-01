@@ -1,0 +1,58 @@
+NASA_DOCUMENTS = [
+    {
+        'title': 'Apollo 11 Mission Report',
+        'url': 'https://ntrs.nasa.gov/api/citations/19700009631/downloads/19700009631.pdf',
+        'filename': 'apollo_11_mission_report.pdf',
+        'mission': 'Apollo 11',
+        'year': 1969,
+    },
+    {
+        'title': 'Apollo 13 Mission Report',
+        'url': 'https://ntrs.nasa.gov/api/citations/19700076528/downloads/19700076528.pdf',
+        'filename': 'apollo_13_mission_report.pdf',
+        'mission': 'Apollo 13',
+        'year': 1970,
+    },
+    {
+        'title': 'Apollo 17 Mission Report',
+        'url': 'https://ntrs.nasa.gov/api/citations/19730019630/downloads/19730019630.pdf',
+        'filename': 'apollo_17_mission_report.pdf',
+        'mission': 'Apollo 17',
+        'year': 1973,
+    },
+    {
+        'title': 'STS-1 Mission Report',
+        'url': 'https://ntrs.nasa.gov/api/citations/19810018349/downloads/19810018349.pdf',
+        'filename': 'sts_1_mission_report.pdf',
+        'mission': 'STS-1 (First Shuttle Flight)',
+        'year': 1981,
+    },
+    {
+        'title': 'Voyager 1 and 2 Jupiter Encounter',
+        'url': 'https://ntrs.nasa.gov/api/citations/19800005955/downloads/19800005955.pdf',
+        'filename': 'voyager_jupiter.pdf',
+        'mission': 'Voyager 1 & 2',
+        'year': 1979,
+    },
+    {
+        'title': 'Hubble Space Telescope Servicing Mission 1',
+        'url': 'https://ntrs.nasa.gov/api/citations/19940018092/downloads/19940018092.pdf',
+        'filename': 'hubble_sm1.pdf',
+        'mission': 'STS-61 (Hubble Repair)',
+        'year': 1993,
+    },
+    {
+        'title': 'Mars Pathfinder Mission and Sojourner Rover',
+        'url': 'https://ntrs.nasa.gov/api/citations/20040200927/downloads/20040200927.pdf',
+        'filename': 'mars_pathfinder.pdf',
+        'mission': 'Mars Pathfinder',
+        'year': 1997,
+    },
+    {
+        'title': 'Mars Exploration Rover Mission Overview',
+        'url': 'https://ntrs.nasa.gov/api/citations/20040171814/downloads/20040171814.pdf',
+        'filename': 'mars_exploration_rovers.pdf',
+        'mission': 'Spirit & Opportunity',
+        'year': 2004,
+    },
+]
