@@ -26,10 +26,14 @@ def chat():
     if len(question) > 500:
         return {'error': 'Question too long (max 500 characters)'}, 400
 
+    token_gen, sources = generate_response(question)
+
     def event_stream():
         try:
-            for token in generate_response(question):
+            for token in token_gen:
                 yield f"data: {json.dumps({'token': token})}\n\n"
+            if sources:
+                yield f"data: {json.dumps({'sources': sources})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             logger.error('RAG pipeline error: %s', e)

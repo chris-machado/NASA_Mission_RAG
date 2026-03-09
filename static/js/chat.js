@@ -7,8 +7,18 @@ const messagesEl = document.getElementById('messages');
 const emptyState = document.getElementById('emptyState');
 const questionInput = document.getElementById('questionInput');
 const sendBtn = document.getElementById('sendBtn');
+const infoToggle = document.getElementById('infoToggle');
+const infoPanel = document.getElementById('infoPanel');
 
 let isStreaming = false;
+
+/* ---------- Info Panel Toggle ---------- */
+
+infoToggle.addEventListener('click', () => {
+  const isOpen = !infoPanel.hidden;
+  infoPanel.hidden = isOpen;
+  infoToggle.classList.toggle('active', !isOpen);
+});
 
 /* ---------- Submit ---------- */
 
@@ -62,6 +72,7 @@ async function sendMessage(question) {
     const decoder = new TextDecoder();
     let buffer = '';
     let fullText = '';
+    let sourcesData = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -82,6 +93,10 @@ async function sendMessage(question) {
           scrollToBottom();
         }
 
+        if (data.sources) {
+          sourcesData = data.sources;
+        }
+
         if (data.error) {
           assistantEl.remove();
           addMessage(data.error, 'error');
@@ -89,6 +104,9 @@ async function sendMessage(question) {
 
         if (data.done) {
           assistantEl.innerHTML = marked.parse(fullText);
+          if (sourcesData) {
+            addSources(assistantEl, sourcesData);
+          }
           scrollToBottom();
         }
       }
@@ -130,6 +148,29 @@ function addThinking() {
   messagesEl.appendChild(div);
   scrollToBottom();
   return div;
+}
+
+function addSources(assistantEl, sources) {
+  const container = document.createElement('div');
+  container.className = 'message-sources';
+
+  const label = document.createElement('span');
+  label.className = 'sources-label';
+  label.textContent = 'Sources';
+  container.appendChild(label);
+
+  for (const src of sources) {
+    const a = document.createElement('a');
+    a.href = src.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = 'source-link';
+    a.textContent = src.title;
+    container.appendChild(a);
+  }
+
+  assistantEl.appendChild(container);
+  scrollToBottom();
 }
 
 function scrollToBottom() {
