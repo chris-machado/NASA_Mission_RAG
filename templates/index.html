@@ -51,7 +51,7 @@
             </div>
             <div class="step-text">
               <strong>Web Scraping</strong>
-              <span>619 mission pages from NASA's <a href="https://www.nasa.gov/a-to-z-of-nasa-missions/" target="_blank" rel="noopener noreferrer">A-to-Z index</a></span>
+              <span>600+ mission pages from NASA's <a href="https://www.nasa.gov/a-to-z-of-nasa-missions/" target="_blank" rel="noopener noreferrer">A-to-Z index</a></span>
             </div>
           </div>
           <div class="pipeline-arrow">
@@ -99,13 +99,13 @@
             </div>
             <div class="step-text">
               <strong>LLM Response</strong>
-              <span>Generated locally by <code>llama3.2:3b</code> via Ollama</span>
+              <span>Generated locally by <code>gemma4:12b</code> via Ollama</span>
             </div>
           </div>
         </div>
 
         <div class="info-note">
-          <strong>Performance note:</strong> This app uses <code>llama3.2:3b</code>, a small 3-billion parameter model running locally via <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a>. Responses may be less accurate or detailed compared to larger commercial models. The tradeoff is full privacy &mdash; your questions never leave this server.
+          <strong>Performance note:</strong> This app runs <code>gemma4:12b</code>, a 12-billion parameter model, locally on an NVIDIA RTX 4090 GPU via <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a>. Local models trade some speed for full privacy &mdash; your questions never leave this server.
         </div>
       </div>
     </div>
@@ -151,7 +151,12 @@
     </footer>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
+          integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"
+          integrity="sha384-XQqX/4yiUGu+oyr87jvWzRuqBUK/adrY0DunhL+tID9m/9dwSpV8h9Fk/Sg6ifVQ"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 </body>
 </html>

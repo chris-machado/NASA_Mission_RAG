@@ -12,6 +12,14 @@ const infoPanel = document.getElementById('infoPanel');
 
 let isStreaming = false;
 
+/* ---------- Markdown rendering (sanitized) ---------- */
+
+function renderMarkdown(text) {
+  // marked → DOMPurify so model-generated markdown can't inject <script> or
+  // event-handler attributes into the page.
+  return DOMPurify.sanitize(marked.parse(text));
+}
+
 /* ---------- Info Panel Toggle ---------- */
 
 infoToggle.addEventListener('click', () => {
@@ -89,7 +97,7 @@ async function sendMessage(question) {
 
         if (data.token) {
           fullText += data.token;
-          assistantEl.innerHTML = marked.parse(fullText);
+          assistantEl.innerHTML = renderMarkdown(fullText);
           scrollToBottom();
         }
 
@@ -103,7 +111,7 @@ async function sendMessage(question) {
         }
 
         if (data.done) {
-          assistantEl.innerHTML = marked.parse(fullText);
+          assistantEl.innerHTML = renderMarkdown(fullText);
           if (sourcesData) {
             addSources(assistantEl, sourcesData);
           }
@@ -133,7 +141,7 @@ function addMessage(text, type) {
     div.className = 'message-error';
     div.textContent = text;
   } else {
-    div.innerHTML = text ? marked.parse(text) : '';
+    div.innerHTML = text ? renderMarkdown(text) : '';
   }
 
   messagesEl.appendChild(div);

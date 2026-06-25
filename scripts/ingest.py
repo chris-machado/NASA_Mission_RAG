@@ -10,14 +10,19 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import chromadb
-from app.ingest.web_sources import fetch_mission_urls
+from dotenv import load_dotenv
+
 from app.ingest.pipeline import ingest_web_page
+from app.ingest.web_sources import fetch_mission_urls
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-CHROMA_DIR = os.path.join(PROJECT_ROOT, 'data', 'chroma_db')
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
+
+_chroma_path = os.environ.get('CHROMA_DB_PATH', os.path.join(PROJECT_ROOT, 'data', 'chroma_db'))
+CHROMA_DIR = _chroma_path if os.path.isabs(_chroma_path) else os.path.join(PROJECT_ROOT, _chroma_path)
 EMBED_MODEL = os.environ.get('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
 
 

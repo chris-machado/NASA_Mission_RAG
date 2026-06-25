@@ -1,24 +1,31 @@
 """Document ingestion pipeline: web pages → chunks → embeddings → ChromaDB."""
 
+import hashlib
 import logging
 import re
+import time
 import unicodedata
+from datetime import date
 
-import ollama
 import requests
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.chat.ollama_client import get_client
+
 logger = logging.getLogger(__name__)
+
+# nomic-embed-text task prefix for stored passages (queries use "search_query:").
+DOCUMENT_PREFIX = 'search_document: '
 
 
 def clean_text(text):
     """Clean extracted web text."""
     # Normalize unicode (smart quotes, em dashes → ASCII equivalents)
     text = unicodedata.normalize('NFKD', text)
-    text = text.replace('\u2018', "'").replace('\u2019', "'")
-    text = text.replace('\u201c', '"').replace('\u201d', '"')
-    text = text.replace('\u2013', '-').replace('\u2014', '-')
+    text = text.replace('‘', "'").replace('’', "'")
+    text = text.replace('“', '"').replace('”', '"')
+    text = text.replace('–', '-').replace('—', '-')
     # Strip any residual HTML tags
     text = re.sub(r'<[^>]+>', '', text)
     # Remove bracketed alt-text leakage (lines that are just [some alt text])
@@ -30,12 +37,51 @@ def clean_text(text):
     return text.strip()
 
 
+def extract_year(text, today=None):
+    """Best-effort launch/start year for a mission page.
+
+    Prefers a 4-digit year appearing just after a launch-related keyword; falls
+    back to the earliest plausible year mentioned. Returns 0 when nothing is
+    plausible. "Plausible" = 1958 (NASA's founding) .. current year + 10 (to
+    allow announced future launches).
+    """
+    current_year = (today or date.today()).year
+    lo, hi = 1958, current_year + 10
+
+    def keep(values):
+        return [y for y in values if lo <= y <= hi]
+
+    near = keep(int(y) for y in re.findall(
+        r'(?:launch\w*|lift[\s-]?off|began|started)\D{0,40}((?:19|20)\d{2})',
+        text, re.I,
+    ))
+    if near:
+        return min(near)
+
+    allyears = keep(int(y) for y in re.findall(r'\b(?:19|20)\d{2}\b', text))
+    return min(allyears) if allyears else 0
+
+
+def _get_with_retry(url, *, timeout=60, retries=3, backoff=2.0, headers=None):
+    """HTTP GET with simple exponential backoff for transient failures."""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, timeout=timeout, headers=headers)
+            resp.raise_for_status()
+            return resp
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                time.sleep(backoff * (attempt + 1))
+    raise last_exc
+
+
 def extract_text_from_web_page(url):
     """Fetch a web page and extract its main textual content."""
-    resp = requests.get(url, timeout=60, headers={
+    resp = _get_with_retry(url, timeout=60, headers={
         'User-Agent': 'NASA-Mission-RAG/1.0 (Educational Research)',
     })
-    resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, 'html.parser')
 
@@ -104,18 +150,23 @@ def chunk_text(text, chunk_size=800, chunk_overlap=200):
     )
     raw_chunks = splitter.split_text(text)
     return [
-        {'text': t, 'page': 1, 'chunk_index': i}
+        {'text': t, 'chunk_index': i}
         for i, t in enumerate(raw_chunks)
     ]
 
 
 def embed_chunks(chunks, model='nomic-embed-text', batch_size=50):
-    """Generate embeddings for text chunks using Ollama."""
+    """Generate embeddings for text chunks using Ollama.
+
+    Each passage is prefixed with "search_document:" (nomic-embed-text's expected
+    document instruction); the stored chunk text stays clean.
+    """
+    client = get_client()
     embeddings = []
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
-        texts = [c['text'] for c in batch]
-        response = ollama.embed(model=model, input=texts)
+        texts = [DOCUMENT_PREFIX + c['text'] for c in batch]
+        response = client.embed(model=model, input=texts)
         embeddings.extend(response['embeddings'])
         logger.info('Embedded batch %d/%d', i // batch_size + 1,
                      (len(chunks) + batch_size - 1) // batch_size)
@@ -123,7 +174,7 @@ def embed_chunks(chunks, model='nomic-embed-text', batch_size=50):
 
 
 def ingest_web_page(collection, url, mission_name, embed_model='nomic-embed-text'):
-    """Ingest a single web page into ChromaDB."""
+    """Ingest a single web page into ChromaDB (idempotent per source URL)."""
     logger.info('Processing web page: %s ...', mission_name)
 
     text = extract_text_from_web_page(url)
@@ -132,24 +183,31 @@ def ingest_web_page(collection, url, mission_name, embed_model='nomic-embed-text
         return 0
 
     chunks = chunk_text(text)
-    logger.info('  %d characters → %d chunks', len(text), len(chunks))
+    year = extract_year(text)
+    logger.info('  %d characters → %d chunks (year=%s)', len(text), len(chunks), year)
 
     embeddings = embed_chunks(chunks, model=embed_model)
 
-    # Create a stable source id from the URL
-    source_id = re.sub(r'[^a-zA-Z0-9]', '_', url.split('nasa.gov')[-1])[:80]
-    ids = [f"web_{source_id}_{i}" for i in range(len(chunks))]
+    # Stable, collision-free id prefix from a hash of the URL.
+    source_hash = hashlib.sha1(url.encode('utf-8')).hexdigest()[:16]
+    ids = [f"web_{source_hash}_{i}" for i in range(len(chunks))]
     documents = [c['text'] for c in chunks]
     metadatas = [
         {
             'source': url,
             'mission': mission_name,
-            'year': 0,
-            'page': 1,
+            'year': year,
             'chunk_index': c['chunk_index'],
         }
         for c in chunks
     ]
+
+    # Idempotent re-ingest: drop any prior chunks for this URL first, so a page
+    # that now yields fewer chunks can't leave orphaned high-index chunks behind.
+    try:
+        collection.delete(where={'source': url})
+    except Exception:
+        logger.exception('  Failed to clear existing chunks for %s', url)
 
     collection.upsert(
         ids=ids,

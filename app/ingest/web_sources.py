@@ -3,8 +3,9 @@
 import logging
 import re
 
-import requests
 from bs4 import BeautifulSoup
+
+from app.ingest.pipeline import _get_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,7 @@ def fetch_mission_urls():
         List of dicts with keys: name, url
     """
     logger.info('Fetching NASA A-to-Z missions index...')
-    resp = requests.get(A_TO_Z_URL, timeout=60)
-    resp.raise_for_status()
+    resp = _get_with_retry(A_TO_Z_URL, timeout=60)
 
     soup = BeautifulSoup(resp.text, 'html.parser')
     missions = []
@@ -53,6 +53,12 @@ def fetch_mission_urls():
             'name': name,
             'url': href,
         })
+
+    if not missions:
+        raise RuntimeError(
+            'No mission URLs found on the A-to-Z index — the page structure may '
+            'have changed. Aborting so an empty scrape cannot replace the corpus.'
+        )
 
     logger.info('Found %d mission pages', len(missions))
     return missions

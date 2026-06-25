@@ -27,7 +27,12 @@ def create_app(config_name=None):
 
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
-    limiter = Limiter(get_remote_address, app=app, default_limits=["30 per minute"])
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["30 per minute"],
+        storage_uri=app.config['RATELIMIT_STORAGE_URI'],
+    )
     app.limiter = limiter
 
     from app.chat.routes import chat_bp
