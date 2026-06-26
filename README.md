@@ -8,8 +8,11 @@ vector search. No data leaves the server.
 ## Architecture
 
 ```
-User query
+User query (+ recent turns as history)
    │  POST /api/chat
+   ▼
+generate_response()   follow-up? → condense to a standalone query (_contextualize_query)
+   │                  ("what did it find at Saturn?" → "...did Voyager find at Saturn?")
    ▼
 rag.retrieve()         embed query (nomic-embed-text, "search_query:" prefix)
    │   topical  →  vector search + keyword-filtered arms → Reciprocal Rank Fusion
@@ -19,13 +22,13 @@ rag.retrieve()         embed query (nomic-embed-text, "search_query:" prefix)
    │   cross-encoder rerank (bge-reranker-v2-m3), fused with first-stage rank,
    │   then per-mission diversity cap
    ▼
-rag.generate_response()  format context → stream gemma4:26b via Ollama
+generate_response()  format context → replay history → stream gemma4:26b via Ollama
    │  Server-Sent Events
    ▼
 Browser   marked.js → DOMPurify → rendered markdown
 ```
 
-- **`app/chat/rag.py`** — two-stage retrieval (hybrid/temporal candidate pool → cross-encoder rerank fused with the first-stage rank) and streamed generation.
+- **`app/chat/rag.py`** — two-stage retrieval (hybrid/temporal candidate pool → cross-encoder rerank fused with the first-stage rank), multi-turn follow-up handling (`_contextualize_query`/`_normalize_history`), and streamed generation.
 - **`app/chat/reranker.py`** — lazily-loaded cross-encoder, kept GPU-resident, with graceful fallback to fusion order if unavailable.
 - **`app/chat/ollama_client.py`** — single configured Ollama client (honors `OLLAMA_BASE_URL`, has a timeout).
 - **`app/chat/routes.py`** — `GET /` UI, `POST /api/chat` (SSE), `GET /api/health` (deep check).
@@ -119,4 +122,6 @@ See `.env.example`. Key variables: `OLLAMA_CHAT_MODEL` (`gemma4:26b`),
 `RAG_TEMPERATURE` (`0.3`), `RAG_CANDIDATE_K` (`40`, rerank pool size),
 `RAG_RERANK_MODEL` (`BAAI/bge-reranker-v2-m3`), `RAG_RERANK_WEIGHT` (`0.5`,
 cross-encoder weight when fused with first-stage retrieval), `RAG_RERANK_DEVICE`
-(`auto`).
+(`auto`). Conversational memory: `RAG_CONTEXTUALIZE` (`true`, rewrite follow-ups
+into standalone queries), `RAG_HISTORY_MAX_TURNS` (`6`), `RAG_HISTORY_MAX_CHARS`
+(`1200`).

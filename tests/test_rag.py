@@ -228,3 +228,138 @@ def test_retrieve_temporal_gates_out_old_missions(app, monkeypatch):
     missions = [r['metadata']['mission'] for r in results]
     assert 'Artemis II' in missions
     assert 'Apollo 13' not in missions
+
+
+# --- Conversational memory: history normalization + query contextualization ----
+
+class FakeChatClient:
+    """Stands in for the Ollama client: non-streamed chat (condense) returns a
+    dict; streamed chat (generation) yields message chunks. Records the last call."""
+
+    def __init__(self, reply='', capture=None):
+        self._reply = reply
+        self.capture = capture
+
+    def chat(self, model, messages, stream=False, think=None, options=None):
+        if self.capture is not None:
+            self.capture.update(model=model, messages=messages, options=options)
+        if stream:
+            def gen():
+                yield {'message': {'content': self._reply}}
+            return gen()
+        return {'message': {'content': self._reply}}
+
+
+def test_normalize_history_drops_malformed_and_caps(app):
+    raw = [
+        'not a dict',
+        {'role': 'system', 'content': 'x'},        # bad role
+        {'role': 'user', 'content': '   '},         # empty after strip
+        {'role': 'user', 'content': 'Q1'},
+        {'role': 'assistant', 'content': 'A1'},
+        {'role': 'user', 'content': 'Q2'},
+        {'role': 'assistant', 'content': 'A2'},
+    ]
+    with app.app_context():
+        app.config['RAG_HISTORY_MAX_TURNS'] = 2
+        out = rag._normalize_history(raw)
+    assert out == [{'role': 'user', 'content': 'Q2'},
+                   {'role': 'assistant', 'content': 'A2'}]
+
+
+def test_normalize_history_trims_leading_assistant(app):
+    # A history that opens on an assistant turn (truncated mid-exchange) is trimmed
+    # so the replayed messages start on a user turn.
+    raw = [{'role': 'assistant', 'content': 'A0'},
+           {'role': 'user', 'content': 'Q1'},
+           {'role': 'assistant', 'content': 'A1'}]
+    with app.app_context():
+        out = rag._normalize_history(raw)
+    assert [t['role'] for t in out] == ['user', 'assistant']
+    assert out[0]['content'] == 'Q1'
+
+
+def test_normalize_history_truncates_long_turns(app):
+    with app.app_context():
+        app.config['RAG_HISTORY_MAX_CHARS'] = 100
+        out = rag._normalize_history([{'role': 'user', 'content': 'x' * 5000}])
+    assert len(out[0]['content']) == 100
+
+
+def test_normalize_history_non_list_returns_empty(app):
+    with app.app_context():
+        assert rag._normalize_history(None) == []
+        assert rag._normalize_history('nope') == []
+
+
+def test_contextualize_query_no_history_skips_llm(app, monkeypatch):
+    def boom():
+        raise AssertionError('no client should be built without history')
+    monkeypatch.setattr(rag, 'get_client', boom)
+    with app.app_context():
+        assert rag._contextualize_query('hello', []) == 'hello'
+
+
+def test_contextualize_query_rewrites_with_history(app, monkeypatch):
+    monkeypatch.setattr(rag, 'get_client',
+                        lambda: FakeChatClient(reply='What did Voyager discover at Saturn?'))
+    hist = [{'role': 'user', 'content': 'Tell me about Voyager'},
+            {'role': 'assistant', 'content': 'Voyager 1 and 2 flew by the outer planets.'}]
+    with app.app_context():
+        out = rag._contextualize_query('what about Saturn?', hist)
+    assert out == 'What did Voyager discover at Saturn?'
+
+
+def test_contextualize_query_strips_echoed_label(app, monkeypatch):
+    monkeypatch.setattr(rag, 'get_client',
+                        lambda: FakeChatClient(reply='Standalone question: What did Voyager find at Saturn?'))
+    hist = [{'role': 'user', 'content': 'Tell me about Voyager'}]
+    with app.app_context():
+        out = rag._contextualize_query('what about Saturn?', hist)
+    assert out == 'What did Voyager find at Saturn?'
+
+
+def test_contextualize_query_falls_back_on_error(app, monkeypatch):
+    class BoomClient:
+        def chat(self, *a, **k):
+            raise RuntimeError('ollama down')
+    monkeypatch.setattr(rag, 'get_client', lambda: BoomClient())
+    hist = [{'role': 'user', 'content': 'Tell me about Voyager'}]
+    with app.app_context():
+        assert rag._contextualize_query('what about Saturn?', hist) == 'what about Saturn?'
+
+
+def test_contextualize_query_disabled_returns_raw(app, monkeypatch):
+    monkeypatch.setattr(rag, 'get_client',
+                        lambda: FakeChatClient(reply='REWRITTEN'))
+    hist = [{'role': 'user', 'content': 'Tell me about Voyager'}]
+    with app.app_context():
+        app.config['RAG_CONTEXTUALIZE'] = False
+        assert rag._contextualize_query('what about Saturn?', hist) == 'what about Saturn?'
+
+
+def test_generate_response_threads_history_into_messages(app, monkeypatch):
+    cap = {}
+    monkeypatch.setattr(rag, '_contextualize_query', lambda q, h: 'STANDALONE QUERY')
+    seen = {}
+
+    def fake_retrieve(query, n_results=None):
+        seen['query'] = query
+        return [{'text': 'ctx', 'rerank_score': 0.9, 'distance': 0.2,
+                 'metadata': {'mission': 'Voyager 1', 'source': 'u', 'year': 1977}}]
+
+    monkeypatch.setattr(rag, 'retrieve', fake_retrieve)
+    monkeypatch.setattr(rag, 'get_client', lambda: FakeChatClient(reply='answer', capture=cap))
+    hist = [{'role': 'user', 'content': 'Tell me about Voyager'},
+            {'role': 'assistant', 'content': 'Voyager 1 and 2 ...'}]
+    with app.app_context():
+        gen, _sources = rag.generate_response('what about Saturn?', hist)
+        list(gen)  # drain the stream so the chat call fires
+
+    # Retrieval ran on the contextualized (standalone) query, not the raw follow-up.
+    assert seen['query'] == 'STANDALONE QUERY'
+    # History is replayed between the system prompt and the final user turn.
+    assert [m['role'] for m in cap['messages']] == ['system', 'user', 'assistant', 'user']
+    # Only the final user turn carries retrieved context + the original question.
+    assert 'ctx' in cap['messages'][-1]['content']
+    assert 'what about Saturn?' in cap['messages'][-1]['content']

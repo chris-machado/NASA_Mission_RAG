@@ -62,6 +62,16 @@ class Config:
     # service env so the first user query isn't slowed by a model load.
     RAG_RERANK_PRELOAD = os.environ.get(
         'RAG_RERANK_PRELOAD', 'false').lower() in ('1', 'true', 'yes', 'on')
+    # Conversational memory. The browser sends prior turns with each question;
+    # on a follow-up we rewrite it into a standalone search query (one extra,
+    # non-streamed LLM call) so retrieval keeps the entity, then replay the turns
+    # to the chat model. CONTEXTUALIZE=false disables the rewrite (history is
+    # still shown to the model). MAX_TURNS bounds replayed turns; MAX_CHARS caps
+    # each turn so a long prior answer can't crowd out the retrieved context.
+    RAG_CONTEXTUALIZE = os.environ.get(
+        'RAG_CONTEXTUALIZE', 'true').lower() in ('1', 'true', 'yes', 'on')
+    RAG_HISTORY_MAX_TURNS = int(os.environ.get('RAG_HISTORY_MAX_TURNS', '6'))
+    RAG_HISTORY_MAX_CHARS = int(os.environ.get('RAG_HISTORY_MAX_CHARS', '1200'))
 
 
 class DevelopmentConfig(Config):

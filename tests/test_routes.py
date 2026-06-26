@@ -14,7 +14,7 @@ def test_chat_rejects_overlong_question(client):
 
 
 def test_chat_streams_tokens_and_sources(client, monkeypatch):
-    def fake_generate(question):
+    def fake_generate(question, history=None):
         def gen():
             yield 'Hello '
             yield 'world'
@@ -30,8 +30,26 @@ def test_chat_streams_tokens_and_sources(client, monkeypatch):
     assert '"done": true' in body
 
 
+def test_chat_forwards_history_to_backend(client, monkeypatch):
+    seen = {}
+
+    def fake_generate(question, history=None):
+        seen['question'] = question
+        seen['history'] = history
+        return iter(['ok']), []
+
+    monkeypatch.setattr(routes, 'generate_response', fake_generate)
+    hist = [{'role': 'user', 'content': 'Tell me about Voyager'},
+            {'role': 'assistant', 'content': 'Voyager 1 and 2 ...'}]
+    resp = client.post('/api/chat',
+                       json={'question': 'what did it find at Saturn?', 'history': hist})
+    assert resp.status_code == 200
+    assert seen['question'] == 'what did it find at Saturn?'
+    assert seen['history'] == hist
+
+
 def test_chat_handles_backend_failure(client, monkeypatch):
-    def boom(question):
+    def boom(question, history=None):
         raise RuntimeError('ollama down')
 
     monkeypatch.setattr(routes, 'generate_response', boom)

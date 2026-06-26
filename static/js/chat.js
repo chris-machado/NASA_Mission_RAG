@@ -12,6 +12,12 @@ const infoPanel = document.getElementById('infoPanel');
 
 let isStreaming = false;
 
+// Completed conversation turns ({role, content}), kept so follow-up questions
+// carry context. Only the most recent HISTORY_TURNS are sent with each request;
+// the server bounds/validates them again. The in-flight question is never in here.
+const conversation = [];
+const HISTORY_TURNS = 6;
+
 /* ---------- Markdown rendering (sanitized) ---------- */
 
 function renderMarkdown(text) {
@@ -61,10 +67,13 @@ async function sendMessage(question) {
   const thinkingEl = addThinking();
 
   try {
+    // Snapshot prior turns before this exchange completes; the current question
+    // is appended to `conversation` only once it succeeds (below).
+    const history = conversation.slice(-HISTORY_TURNS);
     const response = await fetch('api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, history }),
     });
 
     if (!response.ok) {
@@ -115,6 +124,10 @@ async function sendMessage(question) {
           if (sourcesData) {
             addSources(assistantEl, sourcesData);
           }
+          // Record the completed exchange so the next question has context.
+          conversation.push({ role: 'user', content: question });
+          conversation.push({ role: 'assistant', content: fullText });
+          if (conversation.length > 40) conversation.splice(0, conversation.length - 40);
           scrollToBottom();
         }
       }

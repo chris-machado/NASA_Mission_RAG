@@ -31,10 +31,14 @@ def chat():
     if len(question) > 500:
         return {'error': 'Question too long (max 500 characters)'}, 400
 
+    # Prior conversation turns for follow-up context; generate_response validates
+    # and bounds the shape, so a malformed history degrades to a stateless answer.
+    history = data.get('history')
+
     # Retrieval + client setup happen before streaming, so a down Ollama or empty
     # corpus surfaces as a clean error instead of a half-open SSE stream.
     try:
-        token_gen, sources = generate_response(question)
+        token_gen, sources = generate_response(question, history)
     except Exception as e:
         logger.error('RAG init error: %s', e)
         return {'error': 'The assistant is temporarily unavailable. Please try again.'}, 503

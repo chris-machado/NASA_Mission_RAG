@@ -7,7 +7,7 @@ from flask import current_app
 
 from app.chat import reranker
 from app.chat.ollama_client import get_client
-from app.chat.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from app.chat.prompts import CONDENSE_PROMPT, SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from app.extensions import get_collection
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,9 @@ _RECENCY_RE = re.compile(
     '|'.join(r'\b' + re.escape(t) + r'\b' for t in RECENCY_TERMS), re.I)
 _YEAR_RE = re.compile(r'\b(?:19|20)\d{2}\b')
 _YEAR_LO, _YEAR_FUTURE_PAD = 1958, 10
+
+# Strips a label the condense model sometimes echoes ("Standalone question: ...").
+_CONDENSE_LABEL_RE = re.compile(r'^(?:standalone\s+question|question)\s*:\s*', re.I)
 
 
 def _extract_keywords(query):
@@ -315,9 +318,87 @@ def _build_sources(chunks):
     return list(seen.values())[:3]
 
 
-def generate_response(question):
-    """Retrieve context and return (token_generator, sources_list)."""
-    chunks = retrieve(question)
+def _normalize_history(history):
+    """Coerce client-supplied chat history into a clean, bounded message list.
+
+    The browser sends prior turns as ``[{'role': 'user'|'assistant', 'content': str}]``.
+    We drop anything malformed, truncate long turns, keep only the most recent
+    ``RAG_HISTORY_MAX_TURNS``, and ensure the list starts on a user turn so the
+    model sees well-formed alternation. Returns ``[]`` for anything unusable.
+    """
+    if not isinstance(history, list):
+        return []
+    max_turns = current_app.config.get('RAG_HISTORY_MAX_TURNS', 6)
+    max_chars = current_app.config.get('RAG_HISTORY_MAX_CHARS', 1200)
+    cleaned = []
+    for turn in history:
+        if not isinstance(turn, dict):
+            continue
+        role, content = turn.get('role'), turn.get('content')
+        if role not in ('user', 'assistant') or not isinstance(content, str):
+            continue
+        content = content.strip()
+        if content:
+            cleaned.append({'role': role, 'content': content[:max_chars]})
+    cleaned = cleaned[-max_turns:] if max_turns else cleaned
+    # A conversation must open on a user turn (a leading assistant turn means we
+    # truncated mid-exchange); trim until it does.
+    while cleaned and cleaned[0]['role'] != 'user':
+        cleaned.pop(0)
+    return cleaned
+
+
+def _render_history_text(history):
+    """Flatten history into "User: ...\\nAssistant: ..." lines for the condense prompt."""
+    speaker = {'user': 'User', 'assistant': 'Assistant'}
+    return '\n'.join(f"{speaker[t['role']]}: {t['content']}" for t in history)
+
+
+def _contextualize_query(question, history):
+    """Rewrite a follow-up into a standalone search query using prior turns.
+
+    A bare follow-up ("what did it find at Saturn?") embeds poorly and loses the
+    entity, so retrieval needs the conversation folded back in first. Only runs
+    when there is history, so single-shot questions pay no latency. Falls back to
+    the raw question on any failure or degenerate output — contextualization is an
+    enhancement, never a hard dependency of answering.
+    """
+    if not history or not current_app.config.get('RAG_CONTEXTUALIZE', True):
+        return question
+    try:
+        client = get_client()
+        resp = client.chat(
+            model=current_app.config['OLLAMA_CHAT_MODEL'],
+            messages=[{'role': 'user', 'content': CONDENSE_PROMPT.format(
+                history=_render_history_text(history), question=question)}],
+            stream=False,
+            think=False,
+            options={'temperature': 0.0, 'num_predict': 96,
+                     'num_ctx': current_app.config['OLLAMA_NUM_CTX']},
+        )
+        rewritten = (resp['message']['content'] or '').strip()
+    except Exception:
+        logger.exception('query contextualization failed; using raw question')
+        return question
+    # Take the first non-empty line and strip any echoed label; guard against a
+    # model that ignored the instruction and rambled.
+    rewritten = next((ln.strip() for ln in rewritten.splitlines() if ln.strip()), '')
+    rewritten = _CONDENSE_LABEL_RE.sub('', rewritten).strip()
+    if not rewritten or len(rewritten) > 500:
+        return question
+    return rewritten
+
+
+def generate_response(question, history=None):
+    """Retrieve context and return (token_generator, sources_list).
+
+    ``history`` is the prior conversation (client-supplied); when present we
+    rewrite the question into a standalone search query for retrieval and replay
+    the turns to the chat model so it can resolve follow-up references.
+    """
+    history = _normalize_history(history)
+    search_query = _contextualize_query(question, history)
+    chunks = retrieve(search_query)
 
     if not chunks:
         def empty_gen():
@@ -326,8 +407,9 @@ def generate_response(question):
 
     # Cite only the chunks actually relevant to the question, so off-topic answers
     # ("I don't have a name") carry no citations and focused answers don't tack on
-    # weakly-related leftovers.
-    sources = _build_sources(_citable_chunks(question, chunks))
+    # weakly-related leftovers. Judge relevance against the resolved search query so
+    # a follow-up's citations match what was actually retrieved.
+    sources = _build_sources(_citable_chunks(search_query, chunks))
 
     def _format_chunk_source(c):
         mission = c['metadata'].get('mission', 'Unknown')
@@ -336,8 +418,12 @@ def generate_response(question):
 
     context = '\n\n'.join(_format_chunk_source(c) for c in chunks)
 
+    # Replay prior turns between the system prompt and the current (context-laden)
+    # question so the model can resolve follow-up references. Only the latest user
+    # turn carries retrieved context; earlier turns stay as their plain text.
     messages = [
         {'role': 'system', 'content': SYSTEM_PROMPT.format(today=date.today().strftime('%B %d, %Y'))},
+        *history,
         {'role': 'user', 'content': USER_PROMPT_TEMPLATE.format(
             context=context, question=question,
         )},
