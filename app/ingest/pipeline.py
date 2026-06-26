@@ -37,29 +37,41 @@ def clean_text(text):
     return text.strip()
 
 
+_MONTHS = r'(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)[a-z]*\.?'
+_YEAR = r'(?:19|20)\d{2}'
+# A year sitting right after a launch/liftoff verb (optionally with a date).
+_LAUNCH_YEAR = re.compile(
+    r'\b(?:launch(?:ed|es|ing)?|lift[\s-]?off|liftoff)\b[^.\d]{0,30}?'
+    r'(?:' + _MONTHS + r'\s+\d{1,2}(?:st|nd|rd|th)?,?\s+)?(' + _YEAR + r')\b', re.I)
+# A full "Month Day, Year" calendar date.
+_FULL_DATE = re.compile(
+    _MONTHS + r'\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(' + _YEAR + r')\b', re.I)
+# A "Month Year" date with no day.
+_MONTH_YEAR = re.compile(_MONTHS + r'\s+(' + _YEAR + r')\b', re.I)
+
+
 def extract_year(text, today=None):
     """Best-effort launch/start year for a mission page.
 
-    Prefers a 4-digit year appearing just after a launch-related keyword; falls
-    back to the earliest plausible year mentioned. Returns 0 when nothing is
-    plausible. "Plausible" = 1958 (NASA's founding) .. current year + 10 (to
-    allow announced future launches).
+    Tiered, most-reliable-signal-first: (1) a year next to a launch/liftoff verb,
+    (2) the earliest full "Month Day, Year" date, (3) the earliest "Month Year".
+    Returns 0 when none is present — deliberately, rather than guessing from the
+    earliest bare 4-digit number, which previously mistagged pages with the
+    NASA-founding year (1958) or a stray copyright year. "Plausible" = 1958 ..
+    current year + 10 (to allow announced future launches).
     """
     current_year = (today or date.today()).year
     lo, hi = 1958, current_year + 10
 
-    def keep(values):
-        return [y for y in values if lo <= y <= hi]
+    def earliest(regex):
+        years = [int(y) for y in regex.findall(text)]
+        years = [y for y in years if lo <= y <= hi]
+        return min(years) if years else None
 
-    near = keep(int(y) for y in re.findall(
-        r'(?:launch\w*|lift[\s-]?off|began|started)\D{0,40}((?:19|20)\d{2})',
-        text, re.I,
-    ))
-    if near:
-        return min(near)
-
-    allyears = keep(int(y) for y in re.findall(r'\b(?:19|20)\d{2}\b', text))
-    return min(allyears) if allyears else 0
+    return (earliest(_LAUNCH_YEAR)
+            or earliest(_FULL_DATE)
+            or earliest(_MONTH_YEAR)
+            or 0)
 
 
 def _get_with_retry(url, *, timeout=60, retries=3, backoff=2.0, headers=None):

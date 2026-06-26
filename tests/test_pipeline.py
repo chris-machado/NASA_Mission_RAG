@@ -17,9 +17,31 @@ def test_extract_year_prefers_launch_keyword():
     assert extract_year('Galileo launched in 1989 to study Jupiter.') == 1989
 
 
-def test_extract_year_falls_back_to_earliest_plausible():
-    # No launch keyword → earliest plausible 4-digit year mentioned.
-    assert extract_year('Results from 2005 built on findings from 1999.') == 1999
+def test_extract_year_launch_date_beats_later_news_year():
+    # JWST regression: a launch date must win over a later year mentioned in news
+    # text (previously this page was mistagged 2025 instead of its 2021 launch).
+    text = ('The telescope launched on Dec. 25, 2021. '
+            'In 2025 it observed distant galaxies.')
+    assert extract_year(text) == 2021
+
+
+def test_extract_year_full_date_beats_bare_month_year():
+    # Apollo 13 regression: an astronaut "selected in September 1962" must not beat
+    # the full launch date "April 11, 1970".
+    text = ('Selected by NASA in September 1962, the crew flew the mission that '
+            'launched. On April 11, 1970, the spacecraft lifted off.')
+    assert extract_year(text) == 1970
+
+
+def test_extract_year_month_year_when_no_full_date():
+    # NISAR-style: only a "Month Year" reference is available.
+    assert extract_year('Limited data was released in February 2026.') == 2026
+
+
+def test_extract_year_no_date_context_returns_zero():
+    # Deliberately does NOT guess from a bare 4-digit year — that previously
+    # mistagged pages with the NASA-founding year (1958) or a copyright year.
+    assert extract_year('Results from 2005 built on findings from 1999.') == 0
 
 
 def test_extract_year_ignores_implausible():

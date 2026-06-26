@@ -12,19 +12,24 @@ User query
    │  POST /api/chat
    ▼
 rag.retrieve()         embed query (nomic-embed-text, "search_query:" prefix)
-   │                   → ChromaDB vector search + keyword-filtered arms
-   │                   → Reciprocal Rank Fusion + per-mission diversity cap
+   │   topical  →  vector search + keyword-filtered arms → Reciprocal Rank Fusion
+   │   temporal →  gate candidates by launch-year metadata + year-in-text
+   │              (so "latest missions in 2026" can't return Apollo 13)
+   │        ▼
+   │   cross-encoder rerank (bge-reranker-v2-m3), fused with first-stage rank,
+   │   then per-mission diversity cap
    ▼
-rag.generate_response()  format context → stream gemma4:12b via Ollama
+rag.generate_response()  format context → stream gemma4:26b via Ollama
    │  Server-Sent Events
    ▼
 Browser   marked.js → DOMPurify → rendered markdown
 ```
 
-- **`app/chat/rag.py`** — retrieval (hybrid vector + keyword via RRF) and streamed generation.
+- **`app/chat/rag.py`** — two-stage retrieval (hybrid/temporal candidate pool → cross-encoder rerank fused with the first-stage rank) and streamed generation.
+- **`app/chat/reranker.py`** — lazily-loaded cross-encoder, kept GPU-resident, with graceful fallback to fusion order if unavailable.
 - **`app/chat/ollama_client.py`** — single configured Ollama client (honors `OLLAMA_BASE_URL`, has a timeout).
 - **`app/chat/routes.py`** — `GET /` UI, `POST /api/chat` (SSE), `GET /api/health` (deep check).
-- **`app/ingest/`** — scrape the A-to-Z index → extract/clean text → chunk → embed (`search_document:` prefix) → ChromaDB.
+- **`app/ingest/`** — scrape the A-to-Z index → extract/clean text → chunk → embed (`search_document:` prefix) → ChromaDB; `extract_year()` tags a per-page launch year for temporal queries.
 - **`app/extensions.py`** — ChromaDB client + `nasa_reports` collection (HNSW, cosine).
 
 ## Setup
@@ -38,9 +43,12 @@ cp .env.example .env          # then edit SECRET_KEY etc.
 Requires a running [Ollama](https://ollama.com) with the chat and embedding models:
 
 ```bash
-ollama pull gemma4:12b
+ollama pull gemma4:26b
 ollama pull nomic-embed-text
 ```
+
+The cross-encoder reranker (`bge-reranker-v2-m3`, ~2.3 GB) downloads from Hugging
+Face on first use and is cached under `~/.cache/huggingface`.
 
 ## GPU (NVIDIA)
 
@@ -60,6 +68,11 @@ Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
 Then `sudo systemctl daemon-reload && sudo systemctl restart ollama`. Verify offload
 with `ollama ps` (should show `100% GPU`) and `nvidia-smi` (VRAM in use during a query).
 
+`gemma4:26b` (~17 GB) + `nomic-embed-text` + the reranker (~2.3 GB) co-reside on a
+24 GB card, so run the app with a **single** gunicorn worker (one reranker
+instance). Set `RAG_RERANK_DEVICE=cpu` to move the reranker off the GPU if VRAM
+is tight.
+
 ## Ingest
 
 ```bash
@@ -70,6 +83,14 @@ python scripts/ingest.py --limit 10       # first 10 (smoke test)
 
 Re-ingest is idempotent per source URL. To rebuild from scratch, delete
 `data/chroma_db/` first.
+
+To refresh launch-year metadata and drop scraper noise **without** re-scraping
+(recomputes `year` from stored text in place):
+
+```bash
+python scripts/repair_metadata.py            # preview (dry run)
+python scripts/repair_metadata.py --apply     # write
+```
 
 ## Run
 
@@ -93,6 +114,9 @@ Ollama and ChromaDB are mocked, so the tests need no model server or vector DB.
 
 ## Configuration
 
-See `.env.example`. Key variables: `OLLAMA_CHAT_MODEL` (`gemma4:12b`),
+See `.env.example`. Key variables: `OLLAMA_CHAT_MODEL` (`gemma4:26b`),
 `OLLAMA_NUM_CTX` (`8192`), `RAG_TOP_K` (`6`), `RAG_MAX_PER_SOURCE` (`2`),
-`RAG_TEMPERATURE` (`0.3`).
+`RAG_TEMPERATURE` (`0.3`), `RAG_CANDIDATE_K` (`40`, rerank pool size),
+`RAG_RERANK_MODEL` (`BAAI/bge-reranker-v2-m3`), `RAG_RERANK_WEIGHT` (`0.5`,
+cross-encoder weight when fused with first-stage retrieval), `RAG_RERANK_DEVICE`
+(`auto`).

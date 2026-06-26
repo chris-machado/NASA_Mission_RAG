@@ -11,6 +11,16 @@ logger = logging.getLogger(__name__)
 
 A_TO_Z_URL = 'https://www.nasa.gov/a-to-z-of-nasa-missions/'
 
+# Some /mission/ links are news-feed cards, not missions; their link text reads
+# like "3 min read<title>article6 hours ago". Reject names that look like that.
+_NAME_JUNK = re.compile(
+    r'\bmin read\b|\b\d+\s*(?:hours?|days?|minutes?|weeks?|months?)\s+ago\b'
+    r'|article\d', re.I)
+
+
+def _is_valid_mission_name(name):
+    return bool(name) and len(name) <= 90 and not _NAME_JUNK.search(name)
+
 
 def fetch_mission_urls():
     """Scrape the A-to-Z index and return a list of mission dicts.
@@ -45,7 +55,7 @@ def fetch_mission_urls():
         if not href.endswith('/'):
             href += '/'
 
-        if href in seen_urls or not name:
+        if href in seen_urls or not _is_valid_mission_name(name):
             continue
 
         seen_urls.add(href)

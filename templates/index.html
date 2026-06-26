@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ask NASA — AI Mission Assistant</title>
+  <title>Ask NASA: AI Mission Assistant</title>
   <meta name="description" content="Ask questions about NASA missions using AI-powered search over official NASA mission pages.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
     <div class="info-panel" id="infoPanel" hidden>
       <div class="info-content">
         <h3>How It Works</h3>
-        <p>This app runs <strong>entirely locally</strong> &mdash; no data is sent to external AI services. It uses <strong>Retrieval-Augmented Generation (RAG)</strong> to answer questions from real NASA content.</p>
+        <p>This app runs <strong>entirely locally</strong>, so no data is sent to external AI services. It uses <strong>Retrieval-Augmented Generation (RAG)</strong> to answer questions from real NASA content.</p>
 
         <!-- Pipeline Diagram -->
         <div class="pipeline">
@@ -63,7 +63,7 @@
             </div>
             <div class="step-text">
               <strong>Chunk &amp; Embed</strong>
-              <span>Text split into ~4,000 chunks, embedded with <code>nomic-embed-text</code></span>
+              <span>Text split into ~4,100 chunks, embedded with <code>nomic-embed-text</code></span>
             </div>
           </div>
           <div class="pipeline-arrow">
@@ -87,7 +87,7 @@
             </div>
             <div class="step-text">
               <strong>Your Question</strong>
-              <span>Matched to the most relevant chunks via hybrid search</span>
+              <span>Hybrid search (vector + keyword), then a cross-encoder re-ranks for relevance</span>
             </div>
           </div>
           <div class="pipeline-arrow">
@@ -99,13 +99,13 @@
             </div>
             <div class="step-text">
               <strong>LLM Response</strong>
-              <span>Generated locally by <code>gemma4:12b</code> via Ollama</span>
+              <span>Generated locally by <code>gemma4:26b</code> via Ollama</span>
             </div>
           </div>
         </div>
 
         <div class="info-note">
-          <strong>Performance note:</strong> This app runs <code>gemma4:12b</code>, a 12-billion parameter model, locally on an NVIDIA RTX 4090 GPU via <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a>. Local models trade some speed for full privacy &mdash; your questions never leave this server.
+          <strong>Performance note:</strong> This app runs <code>gemma4:26b</code>, a 26-billion parameter model, plus a <code>bge-reranker-v2-m3</code> cross-encoder, locally on an NVIDIA RTX 4090 GPU via <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a>. Retrieval is two-stage: hybrid search gathers candidates, then the cross-encoder re-ranks them for relevance. Everything runs locally on the GPU, so your questions stay fully private and never leave this server.
         </div>
       </div>
     </div>

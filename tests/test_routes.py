@@ -40,8 +40,9 @@ def test_chat_handles_backend_failure(client, monkeypatch):
 
 
 def test_health_all_green(client, monkeypatch):
+    chat = client.application.config['OLLAMA_CHAT_MODEL']
     monkeypatch.setattr(routes, 'get_client',
-                        lambda: FakeListClient(['gemma4:12b', 'nomic-embed-text:latest']))
+                        lambda: FakeListClient([chat, 'nomic-embed-text:latest']))
     monkeypatch.setattr(routes, 'get_collection', lambda: FakeCollection(count=42))
     resp = client.get('/api/health')
     assert resp.status_code == 200
@@ -62,8 +63,9 @@ def test_health_missing_chat_model_is_degraded(client, monkeypatch):
 
 
 def test_health_empty_corpus_is_degraded(client, monkeypatch):
+    chat = client.application.config['OLLAMA_CHAT_MODEL']
     monkeypatch.setattr(routes, 'get_client',
-                        lambda: FakeListClient(['gemma4:12b', 'nomic-embed-text:latest']))
+                        lambda: FakeListClient([chat, 'nomic-embed-text:latest']))
     monkeypatch.setattr(routes, 'get_collection', lambda: FakeCollection(count=0))
     resp = client.get('/api/health')
     assert resp.status_code == 503
@@ -73,7 +75,8 @@ def test_health_empty_corpus_is_degraded(client, monkeypatch):
 def test_health_nomic_bare_name_matches_latest_tag(client, monkeypatch):
     # embed model configured as bare "nomic-embed-text" must match the
     # installed "nomic-embed-text:latest".
+    chat = client.application.config['OLLAMA_CHAT_MODEL']
     monkeypatch.setattr(routes, 'get_client',
-                        lambda: FakeListClient(['gemma4:12b', 'nomic-embed-text:latest']))
+                        lambda: FakeListClient([chat, 'nomic-embed-text:latest']))
     monkeypatch.setattr(routes, 'get_collection', lambda: FakeCollection(count=1))
     assert client.get('/api/health').get_json()['components']['embed_model'] == 'ready'

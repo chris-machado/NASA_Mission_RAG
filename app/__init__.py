@@ -25,6 +25,15 @@ def create_app(config_name=None):
     from app.extensions import init_chroma
     init_chroma(app)
 
+    # Optionally load the cross-encoder reranker now so the first user query
+    # isn't slowed by the model load. Off for tests and CLI scripts.
+    if (app.config.get('RAG_RERANK_ENABLED')
+            and app.config.get('RAG_RERANK_PRELOAD')
+            and not app.config.get('TESTING')):
+        from app.chat import reranker
+        reranker.warm_up(app.config['RAG_RERANK_MODEL'],
+                         app.config.get('RAG_RERANK_DEVICE', 'auto'))
+
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
     limiter = Limiter(
